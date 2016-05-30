@@ -1,0 +1,84 @@
+--- # The main aim of this playbook is to show how to get a Node.js application into a Docker container all launched from a unique Ansible Playbook
+- hosts: dockerhost
+  user: test
+  sudo: yes
+  connection: ssh
+  gather_facts: yes      
+  vars_prompt:
+    - name: "Targeted_Directory"
+      prompt: "Please provide the full path of the wanted Dockerfile: either /home/test/amen/ or /home/test/hamza/"
+      private: no
+    - name: "dir"
+      prompt: "Please choose the right directory for your selcted path: /Projet-16-04-16 for amen or CraftAcad-E-com for hamza"
+      private: no
+  tasks:
+    - name: Get EPEL (Extra Packages for Enterprise Linux), a based repository project from Fedora team
+      get_url: url=https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm dest=/home/test/
+    - name: Install it using RPM to enable the EPEL repository
+      raw: rpm -Uvh epel-release-latest-7.noarch.rpm
+      register: command_result
+      failed_when: "'FAILED' in command_result.stderr"
+    - name: Update all packages for a RedHat Distribution
+      yum: pkg=* state=latest
+    - name: Install Consul in the executable directory /usr/local/bin
+      unarchive: src=https://releases.hashicorp.com/consul/0.6.4/consul_0.6.4_linux_amd64.zip dest=/usr/local/bin copy=no
+    - name: Install pip
+      yum: pkg=python-pip state=latest
+    - shell: pip install --upgrade pip
+    - name: Install Consul requirements
+      pip: name={{ item }}
+      with_items:
+        - python-consul
+        - requests
+    - name: Create the executable directory /var/consul
+      file: path=/var/consul state=directory mode=0755
+    - name: Run the Consul agent on the Remote host
+      shell: consul agent -server -bootstrap -data-dir /home/test/store  -bind 192.168.42.162 -client 0.0.0.0  > /dev/null  &
+      sudo: no
+    - name: Add the docker repo
+      raw: curl -fsSL https://get.docker.com/ | sh
+    - name: Install docker-py
+      pip: name=docker-py state=latest
+    - name: Install Docker for RedHat distributions
+      yum: pkg=docker-engine state=latest
+    - name: Start Docker service and enable it in boot
+      service: name=docker state=started enabled=yes
+      register: docker
+    - debug: var=docker
+    - name: Import the first project from the github
+      git: repo=https://github.com/HamzaJridi/CraftAcad-E-com.git dest= "{{ Targeted_Directory }}" update=no clone=no
+      when: Targeted_Directory=="/home/test/hamza/"
+    - name: Import the second project from the github
+      git: repo=https://github.com/AmenallahMeftehh/Projet-16-04-16.git dest= "{{ Targeted_Directory }}" update=no clone=no
+      when: Targeted_Directory=="/home/test/amen/" 
+    - name: Move to the targeted directory of the Dockerfile
+      raw: cd {{ Targeted_Directory }}{{ dir }}
+      register: ch
+    - debug: var=ch
+    - name: Create the script to start the app
+      shell: echo "#!/bin/bash" > {{ Targeted_Directory }}/run.sh
+    - shell: echo "mongod & nodejs server.js" >> {{ Targeted_Directory }}/run.sh
+    - name: Build the NodeJS image
+      docker_image: 
+         name: "node1" 
+         path: "{{ Targeted_Directory }}{{ dir }}" 
+         state: present
+    - name: Run the docker image
+      docker: 
+         image: "node1" 
+         name: node  
+         detach: yes 
+         state: started
+         net: host
+    - name: Update all packages for a RedHat Distribution
+      yum: pkg=* state=latest
+    - name: Add or update the value associated with a key in the key/value store
+      consul_kv:
+        key: "amen"
+        value: "3000"
+        state: present
+    - name: Add or update the value associated with a key in the key/value store
+      consul_kv:
+        key: "hamza"
+        value: "3000"
+        state: present
